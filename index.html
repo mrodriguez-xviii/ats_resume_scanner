@@ -26,6 +26,10 @@
     .pill { display: inline-block; padding: 6px 10px; border-radius: 999px; background: #f0f0f0; font-weight: 700; }
     ul { margin: 8px 0 0; padding-left: 18px; }
     footer { font-size: 12px; color: #444; margin-top: 16px; }
+
+    /* New: file upload + OCR status */
+    input[type="file"] { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
+    .status { margin-top: 10px; }
   </style>
 </head>
 
@@ -42,9 +46,16 @@
       <form id="scanner-form" autocomplete="off">
         <div class="grid">
           <div>
-            <label for="resumeText">Resume text</label>
-            <textarea id="resumeText" name="resumeText" placeholder="Paste your resume text here..."></textarea>
-            <p class="hint">Tip: Copy from a PDF can bring weird spacing. That’s okay.</p>
+            <!-- upload PDF/Image for OCR -->
+            <label for="resumeFile">Upload resume (PDF or image)</label>
+            <input type="file" id="resumeFile" accept="application/pdf,image/*" />
+            <p class="hint">Works with PDFs + photos. For best results, use a clear, high-resolution file.</p>
+
+            <div class="status">
+              <label for="resumeText">Resume text</label>
+              <textarea id="resumeText" name="resumeText" placeholder="Paste your resume text here, or upload a file above..."></textarea>
+              <p class="hint">Tip: Copy from a PDF can bring weird spacing. That’s okay.</p>
+            </div>
           </div>
 
           <div>
@@ -73,7 +84,7 @@
           <span class="pill" id="scorePill">Score: —%</span>
         </p>
         <p class="hint" id="scoreNote">
-          Scan to see your keyword alignment and suggestions.
+          Scan to see your keyword alignment and suggestions. (OCR runs locally in your browser.)
         </p>
       </div>
 
@@ -111,9 +122,17 @@
         <p style="margin:0;">
           This tool compares resume text to a job description and estimates keyword alignment.
           It’s meant for fast iteration and learning how ATS-style screening can work.
+          OCR runs locally in the browser—uploaded files are not sent to a server.
         </p>
       </div>
     </section>
   </main>
+
+  <!-- PDF.js + Tesseract.js for PDF/image OCR (client-side) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.js"></script>
+  <script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <!-- main app logic -->
+  <script src="script.js"></script>
 </body>
 </html>

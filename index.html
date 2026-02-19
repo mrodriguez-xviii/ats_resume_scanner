@@ -51,6 +51,13 @@
             <input type="file" id="resumeFile" accept="application/pdf,image/*" />
             <p class="hint">Works with PDFs + photos. For best results, use a clear, high-resolution file.</p>
 
+		<div id="uploadProgressWrap" style="margin-top:10px; display:none;">
+			<label for="uploadProgress" style="font-weight:700; margin-bottom:6px;">Processing progress</label>
+			<progress id="uploadProgress" value="0" max="100" style="width:100%; height:18px;"></progress>
+			<p class="hint" id="uploadProgressText">Waiting for file…</p>
+		</div>
+
+
             <div class="status">
               <label for="resumeText">Resume text</label>
               <textarea id="resumeText" name="resumeText" placeholder="Paste your resume text here, or upload a file above..."></textarea>

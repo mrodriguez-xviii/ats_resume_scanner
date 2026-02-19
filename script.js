@@ -6,6 +6,10 @@ const form = document.getElementById("scanner-form");
 const resumeTextEl = document.getElementById("resumeText");
 const jobTextEl = document.getElementById("jobText");
 
+const uploadProgressWrap = document.getElementById("uploadProgressWrap");
+const uploadProgress = document.getElementById("uploadProgress");
+const uploadProgressText = document.getElementById("uploadProgressText");
+
 const scanBtn = document.getElementById("scanBtn");
 const clearBtn = document.getElementById("clearBtn");
 const ignoreCommonWordsEl = document.getElementById("ignoreCommonWords");
@@ -56,39 +60,34 @@ const IMPORTANT_PHRASES = [
   "javascript"
 ];
 
-// Normalize text: lowercase, replace punctuation with spaces, collapse whitespace
+// Helpers (Text)
+
 function normalize(text) {
   return (text || "")
     .toLowerCase()
-    .replace(/[\u2019']/g, "")             // remove apostrophes (don't -> dont)
-    .replace(/[^a-z0-9+\s-]/g, " ")        // keep letters, numbers, +, spaces, hyphen
+    .replace(/[\u2019']/g, "")
+    .replace(/[^a-z0-9+\s-]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-// Tokenize into words
 function tokenize(text) {
   const clean = normalize(text);
   if (!clean) return [];
   return clean.split(" ").filter(Boolean);
 }
 
-// Extract keywords from job description
 function extractKeywords(jobText, ignoreStopwords = true) {
   const cleanJob = normalize(jobText);
   if (!cleanJob) return [];
 
   const keywords = new Set();
 
-  // 1) Add important phrases that appear in the job description
   for (const phrase of IMPORTANT_PHRASES) {
     const p = normalize(phrase);
-    if (p && cleanJob.includes(p)) {
-      keywords.add(p);
-    }
+    if (p && cleanJob.includes(p)) keywords.add(p);
   }
 
-  // 2) Word frequency for remaining keywords
   const tokens = tokenize(cleanJob);
   const freq = new Map();
 
@@ -110,7 +109,6 @@ function extractKeywords(jobText, ignoreStopwords = true) {
   return [...keywords].sort();
 }
 
-// Check if a keyword is present in resume text.
 function isKeywordInResume(keyword, resumeTextNormalized) {
   if (!keyword) return false;
 
@@ -126,7 +124,6 @@ function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Render list items
 function renderList(listEl, items, emptyMessage) {
   listEl.innerHTML = "";
 
@@ -145,7 +142,6 @@ function renderList(listEl, items, emptyMessage) {
   }
 }
 
-// Generate suggestions based on missing keywords
 function generateTips(missing, matchedCount, totalCount) {
   const tips = [];
 
@@ -174,7 +170,8 @@ function generateTips(missing, matchedCount, totalCount) {
   return tips;
 }
 
-// Main scan logic
+// Scanner
+
 function runScan() {
   const resumeRaw = resumeTextEl.value || "";
   const jobRaw = jobTextEl.value || "";
@@ -215,11 +212,14 @@ function runScan() {
   renderList(tipsList, tips, "No suggestions yet.");
 }
 
-// Clear logic
 function clearAll() {
   resumeTextEl.value = "";
   jobTextEl.value = "";
-  if (resumeFileEl) resumeFileEl.value = ""; // NEW: clears the file input too
+  if (resumeFileEl) resumeFileEl.value = "";
+
+  // reset + hide progress UI
+  setProgress(0, "Waiting for file…");
+  hideProgress();
 
   scorePill.textContent = "Score: —%";
   scoreNote.textContent = "Scan to see your keyword alignment and suggestions. (OCR runs locally in your browser.)";
@@ -228,7 +228,28 @@ function clearAll() {
   renderList(tipsList, ["Suggestions will show up after a scan."], "");
 }
 
-// Configure PDF.js worker (helps avoid errors in some browsers)
+// Progress UI
+
+function showProgress() {
+  if (!uploadProgressWrap) return;
+  uploadProgressWrap.style.display = "block";
+}
+
+function hideProgress() {
+  if (!uploadProgressWrap) return;
+  uploadProgressWrap.style.display = "none";
+}
+
+function setProgress(value, text) {
+  if (!uploadProgress) return;
+  const v = Math.max(0, Math.min(100, Number(value) || 0));
+  uploadProgress.value = v;
+  if (uploadProgressText && text) uploadProgressText.textContent = text;
+}
+
+// OCR + PDF Parsing 
+
+// Configure PDF.js worker
 if (window.pdfjsLib) {
   pdfjsLib.GlobalWorkerOptions.workerSrc =
     "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.js";
@@ -244,11 +265,13 @@ function setStatus(msg) {
 async function getOcrWorker() {
   if (ocrWorker) return ocrWorker;
 
-  // Create a Tesseract worker once and reuse it (much faster after first load)
+  // Create a Tesseract worker once and reuse it
   ocrWorker = await Tesseract.createWorker("eng", 1, {
     logger: (m) => {
+      // This is OCR engine progress (not page progress)
       if (m && m.status) {
         const pct = m.progress != null ? Math.round(m.progress * 100) : null;
+        // Don’t overwrite the bar, but keep the status helpful
         setStatus(pct != null ? `OCR: ${m.status} (${pct}%)` : `OCR: ${m.status}`);
       }
     }
@@ -273,11 +296,18 @@ async function ocrImageDataURL(dataURL) {
 }
 
 async function pdfToPageDataURLs(file, scale = 2.0) {
+  setProgress(5, "Reading PDF...");
   const buffer = await file.arrayBuffer();
+
+  setProgress(10, "Loading PDF...");
   const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
 
   const pageImages = [];
+
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    // Rendering phase: 10–40%
+    const renderPct = 10 + Math.round((pageNum / pdf.numPages) * 30);
+    setProgress(renderPct, `Rendering PDF page ${pageNum}/${pdf.numPages}...`);
     setStatus(`Rendering PDF page ${pageNum}/${pdf.numPages}...`);
 
     const page = await pdf.getPage(pageNum);
@@ -301,33 +331,50 @@ async function extractTextFromAnyFile(file) {
 
   // Image -> OCR
   if (file.type && file.type.startsWith("image/")) {
+    showProgress();
+    setProgress(10, "Reading image...");
     setStatus("Loading image for OCR...");
+
     const dataURL = await fileToDataURL(file);
+
+    setProgress(40, "Running OCR on image...");
     setStatus("Running OCR on image...");
-    return await ocrImageDataURL(dataURL);
+
+    const text = await ocrImageDataURL(dataURL);
+
+    setProgress(100, "Done ✅");
+    return text;
   }
 
   // PDF -> render pages -> OCR each page
   if (file.type === "application/pdf") {
     if (!window.pdfjsLib) throw new Error("PDF.js not loaded.");
 
-    // scale: higher = better OCR, slower. 2.0 is a good balance.
+    showProgress();
+    setProgress(0, "Starting PDF processing...");
+
     const pageDataURLs = await pdfToPageDataURLs(file, 2.0);
 
     let fullText = "";
     for (let i = 0; i < pageDataURLs.length; i++) {
+      // OCR phase: 40–100%
+      const ocrPct = 40 + Math.round(((i + 1) / pageDataURLs.length) * 60);
+      setProgress(ocrPct, `OCR on PDF page ${i + 1}/${pageDataURLs.length}...`);
       setStatus(`Running OCR on PDF page ${i + 1}/${pageDataURLs.length}...`);
+
       const pageText = await ocrImageDataURL(pageDataURLs[i]);
       if (pageText) fullText += pageText + "\n\n";
     }
 
+    setProgress(100, "Done ✅");
     return fullText.trim();
   }
 
   throw new Error("Unsupported file type. Upload a PDF or image.");
 }
 
-// upload handler
+// upload handler 
+
 if (resumeFileEl) {
   resumeFileEl.addEventListener("change", async () => {
     const file = resumeFileEl.files && resumeFileEl.files[0];
@@ -348,19 +395,28 @@ if (resumeFileEl) {
     scanBtn.disabled = true;
     clearBtn.disabled = true;
 
+    showProgress();
+    setProgress(0, "Starting...");
+    setStatus("Starting OCR... (this can take a minute)");
+
     try {
-      setStatus("Starting OCR... (this can take a minute)");
       const text = await extractTextFromAnyFile(file);
 
       if (!text) {
+        setProgress(100, "Finished (no text found)");
         setStatus("OCR finished, but no text was detected. Try a clearer image/PDF.");
         return;
       }
 
       resumeTextEl.value = text;
+      setProgress(100, "Done ✅");
       setStatus("Resume text extracted! Click Scan Resume ✅");
+
+      // Optional: hide bar after a moment
+      setTimeout(() => hideProgress(), 1200);
     } catch (err) {
       console.error(err);
+      setProgress(0, "Error");
       setStatus("Could not extract text. Try another file or paste text manually.");
     } finally {
       ocrInProgress = false;
@@ -369,6 +425,8 @@ if (resumeFileEl) {
     }
   });
 }
+
+// events 
 
 form.addEventListener("submit", (e) => {
   e.preventDefault();
